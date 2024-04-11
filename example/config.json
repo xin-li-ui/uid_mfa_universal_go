@@ -1,0 +1,7 @@
+{
+  "clientId": "123456",
+  "clientSecret": "123456",
+  "apiHost": "api-gw.ui.com",
+  "redirectUri": "http://localhost:8080/callback",
+  "failmode": "closed"
+}
