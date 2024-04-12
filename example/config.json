@@ -1,7 +1,7 @@
 {
   "clientId": "O997SLMHGIQPZIWZTRUA",
   "clientSecret": "0p9rxCZl55UmgXs0EAhaAfL8D8WKzmZgKiT9e3mF",
-  "apiHost": "api-gw.ui.com",
+  "apiHost": "api-gw.uid1.dev.uidpreview.com",
   "redirectUri": "http://localhost:8080/callback",
   "failmode": "closed"
 }

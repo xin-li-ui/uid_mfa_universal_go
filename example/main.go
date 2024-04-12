@@ -6,16 +6,17 @@ import (
 	"github.com/xin-li-ui/uid_mfa_universal_go/universal_sdk"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path"
 	"strings"
 )
 
-const duoUnavailable = "Duo unavailable"
+const uidUnavailable = "UID unavailable"
 
 type Session struct {
-	duoState string
+	state    string
 	username string
 	failmode string
 }
@@ -31,27 +32,30 @@ type Config struct {
 func main() {
 	session := Session{}
 	file, err := os.Open("config.json")
-	duoConfig := Config{}
+	uidConfig := Config{}
 	if err != nil {
 		log.Fatal("can't open config file: ", err)
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&duoConfig)
+	err = decoder.Decode(&uidConfig)
 	if err != nil {
 		log.Fatal("can't decode config JSON: ", err)
 	}
-	// Step 1: Create a Duo client
-	duoClient, err := universal_sdk.NewClient(duoConfig.ClientId, duoConfig.ClientSecret, duoConfig.ApiHost, duoConfig.RedirectUri)
-	session.failmode = strings.ToUpper(duoConfig.Failmode)
+	// Step 1: Create a UID client
+	uidClient, err := universal_sdk.NewClient(uidConfig.ClientId, uidConfig.ClientSecret, uidConfig.ApiHost, uidConfig.RedirectUri)
+	session.failmode = strings.ToUpper(uidConfig.Failmode)
 	if err != nil {
 		log.Fatal("Error parsing config: ", err)
 	}
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		session.login(w, r, duoClient)
+		session.login(w, r, uidClient)
+	})
+	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		session.login(w, r, uidClient)
 	})
 	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		session.duoCallback(w, r, duoClient)
+		session.callback(w, r, uidClient)
 	})
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
@@ -59,12 +63,15 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func (session *Session) login(w http.ResponseWriter, r *http.Request, c *universal_sdk.Client) {
+func (session *Session) login(w http.ResponseWriter, r *http.Request, client *universal_sdk.Client) {
 	if r.Method == "GET" {
 		// Render the login template
 		renderTemplate("login.html", "This is a demo.", w)
 	} else if r.Method == "POST" {
-		r.ParseForm()
+		err := r.ParseForm()
+		if err != nil {
+			return
+		}
 		session.username = r.FormValue("username")
 		password := r.FormValue("password")
 		if password == "" {
@@ -75,51 +82,55 @@ func (session *Session) login(w http.ResponseWriter, r *http.Request, c *univers
 			renderTemplate("login.html", "Username required", w)
 			return
 		}
-		// Step 2: Call the healthCheck to make sure Duo is accessable
-		_, err := c.HealthCheck()
+		// Step 2: Call the healthCheck to make sure UID is accessible
 
-		// Step 3: If Duo is not available to authenticate then either allow user
-		// to bypass Duo (failopen) or prevent user from authenticating (failclosed)
+		action := "user.login"
+		ip := GetIP(r)
+		ua := r.Header.Get("User-Agent")
+		_, err = client.HealthCheck(session.username, action, ip, ua)
+
+		// Step 3: If UID is not available to authenticate then either allow user
+		// to bypass UID (failopen) or prevent user from authenticating (failclosed)
 		if err != nil {
 			if session.failmode == "CLOSED" {
-				renderTemplate("login.html", duoUnavailable, w)
+				renderTemplate("login.html", uidUnavailable, w)
 			} else {
-				renderTemplate("success.html", duoUnavailable, w)
+				renderTemplate("success.html", uidUnavailable, w)
 			}
 			return
 		}
 
 		// Step 4: Generate and save a state variable
-		session.duoState, err = c.GenerateState()
+		session.state, err = client.GenerateState()
 		if err != nil {
 			log.Fatal("Error generating state: ", err)
 		}
 
-		// Step 5: Create a URL to redirect to inorder to reach the Duo prompt
-		redirectToDuoUrl, err := c.CreateAuthURL(session.username, session.duoState)
+		// Step 5: Create a URL to redirect to inorder to reach the UID prompt
+		authURL, err := client.CreateAuthURL(session.username, session.state, action, ip, ua)
 		if err != nil {
 			log.Fatal("Error creating the auth URL: ", err)
 		}
 
 		// Step 6: Redirect to that prompt
-		http.Redirect(w, r, redirectToDuoUrl, 302)
+		http.Redirect(w, r, authURL, 302)
 	}
 }
 
-func (session *Session) duoCallback(w http.ResponseWriter, r *http.Request, c *universal_sdk.Client) {
-	// Step 7: Grab the state and duo_code variables from the URL parameters
-	urlState := r.URL.Query().Get("state")
-	duoCode := r.URL.Query().Get("duo_code")
+func (session *Session) callback(w http.ResponseWriter, r *http.Request, client *universal_sdk.Client) {
+	// Step 7: Grab the state and code variables from the URL parameters
+	state := r.URL.Query().Get("state")
+	code := r.URL.Query().Get("code")
 
 	// Step 8: Verify that the state in the URL matches the state saved previously
-	if urlState != session.duoState {
-		renderTemplate("login.html", "Duo state does not match saved state", w)
+	if state != session.state {
+		renderTemplate("login.html", "UID state does not match saved state", w)
 		return
 	}
 
-	// Step 9: Exchange the duoCode from the URL parameters and the username of the user trying to authenticate
+	// Step 9: Exchange the code from the URL parameters and the username of the user trying to authenticate
 	// for an authentication token containing information about the auth
-	authToken, err := c.ExchangeAuthorizationCodeFor2faResult(duoCode, session.username)
+	authToken, err := client.GetTokenResponse(code, session.username)
 	if err != nil {
 		log.Fatal("Error exchanging authToken: ", err)
 	}
@@ -134,4 +145,25 @@ func renderTemplate(fileName, message string, w http.ResponseWriter) {
 	tmpl.Execute(w, map[string]interface{}{
 		"Message": message,
 	})
+}
+
+func GetIP(r *http.Request) string {
+	ip := r.Header.Get("X-Real-IP")
+	if ip != "" && net.ParseIP(ip) != nil {
+		return ip
+	}
+
+	ip = r.Header.Get("X-Forwarded-For")
+	for _, i := range strings.Split(ip, ",") {
+		if net.ParseIP(i) != nil {
+			return i
+		}
+	}
+
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && net.ParseIP(ip) != nil {
+		return ip
+	}
+
+	return ""
 }

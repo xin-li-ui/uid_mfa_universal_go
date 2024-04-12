@@ -13,11 +13,11 @@ import (
 
 type MapClaims map[string]interface{}
 
-const duoSignatureAlgorithm = "HS256"
+const signatureAlgorithm = "HS256"
 const audLengthError = "didn't receive exactly 1 aud"
 
 func jwtCreateSignedToken(claims MapClaims, secret string) (string, error) {
-	return jwtCreateSignedTokenWithSignature(claims, secret, duoSignatureAlgorithm)
+	return jwtCreateSignedTokenWithSignature(claims, secret, signatureAlgorithm)
 }
 
 func jwtCreateSignedTokenWithSignature(claims MapClaims, secret string, signature string) (string, error) {
@@ -35,8 +35,8 @@ func jwtCreateSignedTokenWithSignature(claims MapClaims, secret string, signatur
 	return string(requestJWTSignedBytes), nil
 }
 
-func jwtParseAndValidate(inToken string, secret string, claims MapClaims) (*TokenResponse, error) {
-	ltoken, err := jwt.ParseString(inToken, jwt.WithVerify(duoSignatureAlgorithm, []byte(secret)))
+func validateAndDecodeIdToken(inToken string, secret string, claims MapClaims) (*TokenResponse, error) {
+	ltoken, err := jwt.ParseString(inToken, jwt.WithVerify(signatureAlgorithm, []byte(secret)))
 	if err != nil {
 		return nil, err
 	}
@@ -49,12 +49,6 @@ func jwtParseAndValidate(inToken string, secret string, claims MapClaims) (*Toke
 	}
 	if str, ok := (claims["iss"]).(string); ok {
 		validateOptions = append(validateOptions, jwt.WithIssuer(str))
-	}
-	if str, ok := (claims["preferred_username"]).(string); ok {
-		validateOptions = append(validateOptions, jwt.WithClaimValue("preferred_username", str))
-	}
-	if str, ok := (claims["nonce"]).(string); ok && str != "" {
-		validateOptions = append(validateOptions, jwt.WithClaimValue("nonce", str))
 	}
 
 	err = jwt.Validate(ltoken, validateOptions...)
@@ -85,16 +79,4 @@ func jwtParseAndValidate(inToken string, secret string, claims MapClaims) (*Toke
 	}
 
 	return token, nil
-}
-
-// Parse specific field values out of a token. Useful for testing.
-func jwtParseFields(inToken string, secret string, fields []string) MapClaims {
-	parsedClaims := MapClaims{}
-
-	token, _ := jwt.ParseString(inToken, jwt.WithVerify(duoSignatureAlgorithm, []byte(secret)))
-	for _, element := range fields {
-		f, _ := token.Get(element)
-		parsedClaims[element] = f
-	}
-	return parsedClaims
 }
