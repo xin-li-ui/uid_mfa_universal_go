@@ -26,7 +26,7 @@ const clientIdLength = 20
 const clientSecretLength = 40
 const expirationTime = 300
 const allowedSkew = time.Duration(60) * time.Second
-const healthCheckEndpoint = "https://%s/oauth/v1/health_check"
+const healthCheckEndpoint = "https://%s/developer/api/v1/public/mfa_oidc/health_check"
 const oauthV1AuthorizeEndpoint = "https://%s/oauth/v1/authorize"
 const apiHostURIFormat = "https://%s"
 const tokenEndpoint = "https://%s/oauth/v1/token"
@@ -191,6 +191,8 @@ type Client struct {
 	redirectUri         string
 	useDuoCodeAttribute bool
 	duoHttpClient       httpClient
+
+	baseGwUrl string
 }
 
 type httpClient interface {
@@ -218,21 +220,12 @@ func newStrictTLSTransport() *http.Transport {
 	}
 }
 
-func NewClient(clientId, clientSecret, apiHost, redirectUri string, opts ...clientOptions) (*Client, error) {
-	opts = append(opts, UseDuoCodeAttribute())
-	return newClient(clientId, clientSecret, apiHost, redirectUri, opts...)
-}
-
-// Creates a new Client with the ability to turn off use_duo_code_attribute
-func NewClientDuoCodeAttribute(clientId, clientSecret, apiHost, redirectUri string, useDuoCodeAttribute bool) (*Client, error) {
-	if useDuoCodeAttribute {
-		return newClient(clientId, clientSecret, apiHost, redirectUri, UseDuoCodeAttribute())
-	}
+func NewClient(clientId, clientSecret, apiHost, redirectUri string) (*Client, error) {
 	return newClient(clientId, clientSecret, apiHost, redirectUri)
 }
 
 // Creates a new Client with the ability to turn off use_duo_code_attribute
-func newClient(clientId, clientSecret, apiHost, redirectUri string, opts ...clientOptions) (*Client, error) {
+func newClient(clientId, clientSecret, apiHost, redirectUri string) (*Client, error) {
 	if len(clientId) != clientIdLength {
 		return nil, fmt.Errorf(clientIdError)
 	}
@@ -241,37 +234,20 @@ func newClient(clientId, clientSecret, apiHost, redirectUri string, opts ...clie
 	}
 
 	c := &Client{
-		clientId:            clientId,
-		clientSecret:        clientSecret,
-		apiHost:             apiHost,
-		redirectUri:         redirectUri,
-		useDuoCodeAttribute: false,
+		clientId:     clientId,
+		clientSecret: clientSecret,
+		apiHost:      apiHost,
+		redirectUri:  redirectUri,
 		duoHttpClient: &http.Client{
 			Transport: newStrictTLSTransport(),
 		},
 	}
-
-	for _, option := range opts {
-		option(c)
+	if strings.Contains(apiHost, "api-gw") {
+		c.baseGwUrl = apiHost
+	} else {
+		c.baseGwUrl = apiHost + "/gw"
 	}
 	return c, nil
-}
-
-type clientOptions func(*Client)
-
-// WithHTTPClient allows one to set a completely custom http client that
-// will be used to make network calls to the duo api
-func WithHTTPClient(c *http.Client) func(*Client) {
-	return func(duoClient *Client) {
-		duoClient.duoHttpClient = c
-	}
-}
-
-// UseDuoCodeAttribute will set the useDuoCodeAttribute field on the Duo Client to true, the default is false
-func UseDuoCodeAttribute() func(*Client) {
-	return func(duoClient *Client) {
-		duoClient.useDuoCodeAttribute = true
-	}
 }
 
 // Return a cryptographically-secure string of random characters
@@ -355,7 +331,7 @@ func (client *Client) _makeHttpRequest(e, userAgent string, p url.Values) ([]byt
 func (client *Client) HealthCheck() (*HealthCheckResponse, error) {
 	postParams := url.Values{}
 	healthCheckResponse := &HealthCheckResponse{}
-	healthCheckUrl := fmt.Sprintf(healthCheckEndpoint, client.apiHost)
+	healthCheckUrl := fmt.Sprintf(healthCheckEndpoint, client.baseGwUrl)
 
 	token, err := client.createJwtArgs(healthCheckUrl)
 	if err != nil {

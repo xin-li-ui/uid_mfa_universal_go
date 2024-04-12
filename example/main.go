@@ -1,24 +1,23 @@
-package example
+package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/xin-li-ui/uid_mfa_universal_go/universal_sdk"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"path"
 	"strings"
-
-	"github.com/xin-li-ui/uid_mfa_universal_go/universal_sdk"
 )
 
 const duoUnavailable = "Duo unavailable"
 
 type Session struct {
-	duoState    string
-	duoUsername string
-	failmode    string
+	duoState string
+	username string
+	failmode string
 }
 
 type Config struct {
@@ -66,13 +65,13 @@ func (session *Session) login(w http.ResponseWriter, r *http.Request, c *univers
 		renderTemplate("login.html", "This is a demo.", w)
 	} else if r.Method == "POST" {
 		r.ParseForm()
-		session.duoUsername = r.FormValue("username")
+		session.username = r.FormValue("username")
 		password := r.FormValue("password")
 		if password == "" {
 			renderTemplate("login.html", "Password required", w)
 			return
 		}
-		if session.duoUsername == "" {
+		if session.username == "" {
 			renderTemplate("login.html", "Username required", w)
 			return
 		}
@@ -97,7 +96,7 @@ func (session *Session) login(w http.ResponseWriter, r *http.Request, c *univers
 		}
 
 		// Step 5: Create a URL to redirect to inorder to reach the Duo prompt
-		redirectToDuoUrl, err := c.CreateAuthURL(session.duoUsername, session.duoState)
+		redirectToDuoUrl, err := c.CreateAuthURL(session.username, session.duoState)
 		if err != nil {
 			log.Fatal("Error creating the auth URL: ", err)
 		}
@@ -120,7 +119,7 @@ func (session *Session) duoCallback(w http.ResponseWriter, r *http.Request, c *u
 
 	// Step 9: Exchange the duoCode from the URL parameters and the username of the user trying to authenticate
 	// for an authentication token containing information about the auth
-	authToken, err := c.ExchangeAuthorizationCodeFor2faResult(duoCode, session.duoUsername)
+	authToken, err := c.ExchangeAuthorizationCodeFor2faResult(duoCode, session.username)
 	if err != nil {
 		log.Fatal("Error exchanging authToken: ", err)
 	}

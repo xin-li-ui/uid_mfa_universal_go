@@ -13,7 +13,7 @@ import (
 
 type MapClaims map[string]interface{}
 
-const duoSignatureAlgorithm = "HS512"
+const duoSignatureAlgorithm = "HS256"
 const audLengthError = "didn't receive exactly 1 aud"
 
 func jwtCreateSignedToken(claims MapClaims, secret string) (string, error) {
